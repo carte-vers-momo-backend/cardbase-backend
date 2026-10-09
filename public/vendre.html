@@ -38,6 +38,8 @@
 
     <label for="montant">Montant de la carte (USD)</label>
     <input id="montant" type="number" min="1" step="0.01" inputmode="decimal" required>
+    <label for="telephone">Ton numéro MTN MoMo</label>
+    <input id="telephone" type="tel" inputmode="numeric" placeholder="Ex : 64000001" required>
 
     <button id="bouton" type="submit">Envoyer ma carte</button>
   </form>
@@ -76,7 +78,9 @@ document.getElementById('formulaire').addEventListener('submit', async function 
         codeCarte: document.getElementById('codeCarte').value.trim(),
         montantFacial: Number(document.getElementById('montant').value),
         devise: 'USD',
-        moyenPaiement: 'momo'
+                moyenPaiement: 'momo',
+        telephone: document.getElementById('telephone').value.trim()
+
       })
     });
     var data = await reponse.json();
