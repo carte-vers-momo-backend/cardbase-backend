@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gestion des cartes</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; padding: 16px; background: #f5f5f7; color: #1a1a1a; }
+  h1 { font-size: 20px; margin: 0 0 12px; }
+  input, select, button { font-size: 16px; padding: 10px; border-radius: 8px; border: 1px solid #ccc; box-sizing: border-box; }
+  input, select { width: 100%; margin-bottom: 8px; }
+  button { border: 0; color: white; background: #2563eb; font-weight: 600; }
+  .stats { display: flex; gap: 8px; margin: 12px 0; }
+  .stat { flex: 1; background: white; border-radius: 10px; padding: 10px; text-align: center; }
+  .stat b { display: block; font-size: 20px; }
+  .carte { background: white; border-radius: 12px; padding: 14px; margin-bottom: 12px; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+  .carte p { margin: 4px 0; font-size: 15px; }
+  .code { background: #fef9c3; padding: 8px; border-radius: 6px; font-family: monospace; word-break: break-all; margin: 8px 0; }
+  .actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .actions button { flex: 1; }
+  .voir { background: #6b7280; }
+  .valider { background: #16a34a; }
+  .rejeter { background: #dc2626; }
+  #message { margin: 10px 0; padding: 10px; border-radius: 8px; display: none; }
+  .ok { background: #dcfce7; color: #14532d; }
+  .erreur { background: #fee2e2; color: #7f1d1d; }
+</style>
+</head>
+<body>
+<h1>Gestion des cartes</h1>
+<input id="cle" type="password" placeholder="Clé admin">
+<select id="filtre">
+  <option value="en_attente_verification">En attente</option>
+  <option value="payee">Payées</option>
+  <option value="rejetee">Rejetées</option>
+</select>
+<button id="charger" style="width:100%">Charger</button>
+
+<div id="message"></div>
+<div class="stats">
+  <div class="stat"><b id="s-attente">-</b>En attente</div>
+  <div class="stat"><b id="s-payees">-</b>Payées</div>
+  <div class="stat"><b id="s-marge">-</b>Marge (USD)</div>
+</div>
+<div id="liste"></div>
+
+<script>
+function montrer(texte, classe) {
+  var m = document.getElementById('message');
+  m.textContent = texte;
+  m.className = classe;
+  m.style.display = 'block';
+}
+
+async function api(chemin, options) {
+  options = options || {};
+  options.headers = {
+    'Content-Type': 'application/json',
+    'x-admin-key': document.getElementById('cle').value.trim()
+  };
+  var r = await fetch(chemin, options);
+  var data = await r.json().catch(function () { return {}; });
+  if (!r.ok) throw new Error(data.erreur || ('Erreur ' + r.status));
+  return data;
+}
+
+function ligne(parent, texte) {
+  var p = document.createElement('p');
+  p.textContent = texte;
+  parent.appendChild(p);
+}
+
+function bouton(texte, classe, action) {
+  var b = document.createElement('button');
+  b.textContent = texte;
+  b.className = classe;
+  b.addEventListener('click', action);
+  return b;
+}
+
+async function traiter(id, confirme) {
+  var question = confirme ? 'Valider et payer cette carte ?' : 'Rejeter cette carte ?';
+  if (!confirm(question)) return;
+  try {
+    var rep = await api('/soumissions/' + id + '/valider', {
+      method: 'POST',
+      body: JSON.stringify({ soldeReelConfirme: confirme })
+    });
+    montrer('Résultat : ' + rep.statut, 'ok');
+  } catch (e) {
+    montrer(e.message, 'erreur');
+  }
+  charger();
+}
+
+async function charger() {
+  document.getElementById('message').style.display = 'none';
+  try {
+    var stats = await api('/admin/stats');
+    document.getElementById('s-attente').textContent = stats.en_attente;
+    document.getElementById('s-payees').textContent = stats.total_payees;
+    document.getElementById('s-marge').textContent = stats.marge_generee_estimee;
+
+    var statut = document.getElementById('filtre').value;
+    var data = await api('/admin/soumissions?statut=' + encodeURIComponent(statut));
+    var liste = document.getElementById('liste');
+    liste.textContent = '';
+
+    if (data.soumissions.length === 0) {
+      montrer('Aucune carte dans cette catégorie.', 'ok');
+      return;
+    }
+
+    data.soumissions.forEach(function (s) {
+      var div = document.createElement('div');
+      div.className = 'carte';
+      ligne(div, s.type_carte + ' : ' + s.montant_facial + ' ' + s.devise);
+      ligne(div, 'Taux ' + Math.round(s.taux_applique * 100) + '% , à payer : ' + s.montant_propose + ' ' + s.devise);
+      ligne(div, 'Reçue le ' + new Date(s.cree_le).toLocaleString('fr-FR'));
+
+      var zoneCode = document.createElement('div');
+      div.appendChild(zoneCode);
+
+      var actions = document.createElement('div');
+      actions.className = 'actions';
+      actions.appendChild(bouton('Voir le code', 'voir', async function () {
+        try {
+          var detail = await api('/admin/soumissions/' + s.id);
+          zoneCode.className = 'code';
+          zoneCode.textContent = detail.code_carte;
+        } catch (e) { montrer(e.message, 'erreur'); }
+      }));
+      if (s.statut === 'en_attente_verification') {
+        actions.appendChild(bouton('Valider', 'valider', function () { traiter(s.id, true); }));
+        actions.appendChild(bouton('Rejeter', 'rejeter', function () { traiter(s.id, false); }));
+      }
+      div.appendChild(actions);
+      liste.appendChild(div);
+    });
+  } catch (e) {
+    montrer(e.message, 'erreur');
+  }
+}
+
+document.getElementById('charger').addEventListener('click', charger);
+</script>
+</body>
+</html>
