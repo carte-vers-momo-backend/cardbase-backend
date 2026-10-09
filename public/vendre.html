@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vendre une carte cadeau</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; padding: 20px; background: #f5f5f7; color: #1a1a1a; }
+  .boite { max-width: 420px; margin: 0 auto; background: white; border-radius: 14px; padding: 22px; box-shadow: 0 2px 8px rgba(0,0,0,.08); }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  p.sous { color: #666; font-size: 14px; margin: 0 0 18px; }
+  label { display: block; font-size: 14px; margin: 14px 0 6px; font-weight: 600; }
+  input, select { width: 100%; padding: 12px; font-size: 16px; border: 1px solid #ccc; border-radius: 8px; box-sizing: border-box; }
+  button { width: 100%; margin-top: 20px; padding: 14px; font-size: 16px; border: 0; border-radius: 8px; background: #16a34a; color: white; font-weight: 600; }
+  button:disabled { opacity: .6; }
+  #resultat { margin-top: 18px; padding: 14px; border-radius: 8px; font-size: 15px; display: none; }
+  .ok { background: #dcfce7; color: #14532d; }
+  .erreur { background: #fee2e2; color: #7f1d1d; }
+</style>
+</head>
+<body>
+<div class="boite">
+  <h1>Vendre une carte cadeau</h1>
+  <p class="sous">Ta carte est vérifiée avant tout paiement.</p>
+
+  <form id="formulaire">
+    <label for="typeCarte">Type de carte</label>
+    <select id="typeCarte">
+      <option value="apple">Apple / iTunes</option>
+      <option value="amazon">Amazon</option>
+      <option value="google_play">Google Play</option>
+      <option value="steam">Steam</option>
+      <option value="autre">Autre</option>
+    </select>
+
+    <label for="codeCarte">Code de la carte</label>
+    <input id="codeCarte" type="text" required autocomplete="off">
+
+    <label for="montant">Montant de la carte (USD)</label>
+    <input id="montant" type="number" min="1" step="0.01" inputmode="decimal" required>
+
+    <button id="bouton" type="submit">Envoyer ma carte</button>
+  </form>
+
+  <div id="resultat"></div>
+</div>
+
+<script>
+function idUtilisateur() {
+  try {
+    var id = localStorage.getItem('cardbase_uid');
+    if (!id) {
+      id = crypto.randomUUID();
+      localStorage.setItem('cardbase_uid', id);
+    }
+    return id;
+  } catch (e) {
+    return crypto.randomUUID();
+  }
+}
+
+document.getElementById('formulaire').addEventListener('submit', async function (e) {
+  e.preventDefault();
+  var bouton = document.getElementById('bouton');
+  var zone = document.getElementById('resultat');
+  bouton.disabled = true;
+  zone.style.display = 'none';
+
+  try {
+    var reponse = await fetch('/soumettre-carte', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        utilisateurId: idUtilisateur(),
+        typeCarte: document.getElementById('typeCarte').value,
+        codeCarte: document.getElementById('codeCarte').value.trim(),
+        montantFacial: Number(document.getElementById('montant').value),
+        devise: 'USD',
+        moyenPaiement: 'momo'
+      })
+    });
+    var data = await reponse.json();
+    zone.style.display = 'block';
+    if (reponse.ok) {
+      zone.className = 'ok';
+      zone.textContent = 'Carte reçue. Montant proposé : ' + data.montantPropose + ' USD. Vérification en cours.';
+      document.getElementById('formulaire').reset();
+    } else {
+      zone.className = 'erreur';
+      zone.textContent = data.erreur || 'Une erreur est survenue.';
+    }
+  } catch (err) {
+    zone.style.display = 'block';
+    zone.className = 'erreur';
+    zone.textContent = 'Impossible de joindre le serveur. Réessaie dans une minute.';
+  }
+  bouton.disabled = false;
+});
+</script>
+</body>
+</html>
