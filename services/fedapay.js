@@ -14,6 +14,9 @@ function chiffres(tel) {
 async function declencherPayout({ montantUsd, telephone, reference }) {
   const numero = chiffres(telephone);
   if (numero.length < 8) throw new Error('Numéro MoMo invalide.');
+  if (process.env.PAIEMENT_MANUEL === 'oui') {
+    return { reference: 'manuel', montantXof: 0 };
+  }
 
   const montantXof = Math.round(Number(montantUsd) * TAUX_USD_XOF);
   const entetes = {
