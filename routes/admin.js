@@ -3,7 +3,8 @@ const router = express.Router();
 const db = require('../db');
 const { authAdmin } = require('../middleware/authAdmin');
 
-router.use(authAdmin);
+router.use('/admin', authAdmin);
+
 
 router.get('/admin/soumissions', async (req, res) => {
   try {
