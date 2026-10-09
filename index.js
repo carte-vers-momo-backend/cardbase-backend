@@ -5,6 +5,8 @@ const app = express();
 
 app.use(express.json());
 
+app.use(express.static('public', { extensions: ['html'] }));
+
 app.use('/', require('./routes/soumettreCarte'));
 app.use('/', require('./routes/admin'));
 
