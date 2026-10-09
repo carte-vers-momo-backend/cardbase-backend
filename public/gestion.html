@@ -21,7 +21,7 @@
   .voir { background: #6b7280; }
   .valider { background: #16a34a; }
   .rejeter { background: #dc2626; }
-  #message { margin: 10px 0; padding: 10px; border-radius: 8px; display: none; }
+  #message { margin: 10px 0; padding: 10px; border-radius: 8px; display: none; word-break: break-word; }
   .ok { background: #dcfce7; color: #14532d; }
   .erreur { background: #fee2e2; color: #7f1d1d; }
 </style>
@@ -81,16 +81,20 @@ function bouton(texte, classe, action) {
 async function traiter(id, confirme) {
   var question = confirme ? 'Valider et payer cette carte ?' : 'Rejeter cette carte ?';
   if (!confirm(question)) return;
+  var texte, classe;
   try {
     var rep = await api('/soumissions/' + id + '/valider', {
       method: 'POST',
       body: JSON.stringify({ soldeReelConfirme: confirme })
     });
-    montrer('Résultat : ' + rep.statut, 'ok');
+    texte = 'Résultat : ' + rep.statut + (rep.montantXof ? ' (' + rep.montantXof + ' XOF envoyés)' : '');
+    classe = 'ok';
   } catch (e) {
-    montrer(e.message, 'erreur');
+    texte = e.message;
+    classe = 'erreur';
   }
-  charger();
+  await charger();
+  montrer(texte, classe);
 }
 
 async function charger() {
@@ -127,7 +131,7 @@ async function charger() {
         try {
           var detail = await api('/admin/soumissions/' + s.id);
           zoneCode.className = 'code';
-          zoneCode.textContent = detail.code_carte;
+          zoneCode.textContent = detail.code_carte + ' | MoMo : ' + (detail.telephone || 'non renseigné');
         } catch (e) { montrer(e.message, 'erreur'); }
       }));
       if (s.statut === 'en_attente_verification') {
