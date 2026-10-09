@@ -30,24 +30,27 @@ function calculerMontantPropose(typeCarte, montantFacial) {
 
 router.post('/soumettre-carte', async (req, res) => {
   try {
-    const { utilisateurId, typeCarte, codeCarte, montantFacial, devise, moyenPaiement } = req.body;
+    const { utilisateurId, typeCarte, codeCarte, montantFacial, devise, moyenPaiement, telephone } = req.body;
 
     if (!utilisateurId || !typeCarte || !codeCarte || !montantFacial) {
-      return res.status(400).json({ erreur: 'Champs manquants : utilisateurId, typeCarte, codeCarte, montantFacial sont requis.' });
+      return res.status(400).json({ erreur: 'Champs manquants.' });
     }
-    if (montantFacial <= 0) {
-      return res.status(400).json({ erreur: 'Le montant facial doit être positif.' });
+    if (Number(montantFacial) <= 0) {
+      return res.status(400).json({ erreur: 'Le montant doit être positif.' });
+    }
+    const chiffresTel = String(telephone || '').replace(/\D/g, '');
+    if (chiffresTel.length < 8 || chiffresTel.length > 13) {
+      return res.status(400).json({ erreur: 'Numéro MoMo invalide.' });
     }
 
     const { taux, montantPropose } = calculerMontantPropose(typeCarte.toLowerCase(), Number(montantFacial));
-
     const soumissionId = uuidv4();
 
     await db.query(
       `INSERT INTO cartes_soumises
-        (id, utilisateur_id, type_carte, code_carte, montant_facial, devise, taux_applique, montant_propose, moyen_paiement, statut, cree_le)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'en_attente_verification', NOW())`,
-      [soumissionId, utilisateurId, typeCarte, codeCarte, montantFacial, devise || 'USD', taux, montantPropose, moyenPaiement || 'momo']
+        (id, utilisateur_id, type_carte, code_carte, montant_facial, devise, taux_applique, montant_propose, moyen_paiement, telephone, statut, cree_le)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'en_attente_verification', NOW())`,
+      [soumissionId, utilisateurId, typeCarte, codeCarte, montantFacial, devise || 'USD', taux, montantPropose, moyenPaiement || 'momo', chiffresTel]
     );
 
     return res.status(201).json({
@@ -55,7 +58,7 @@ router.post('/soumettre-carte', async (req, res) => {
       montantPropose,
       taux,
       statut: 'en_attente_verification',
-      message: 'Carte reçue. Vérification en cours, tu seras notifié une fois validée.',
+      message: 'Carte reçue. Vérification en cours.',
     });
   } catch (err) {
     console.error('Erreur /soumettre-carte :', err);
@@ -64,34 +67,53 @@ router.post('/soumettre-carte', async (req, res) => {
 });
 
 router.post('/soumissions/:id/valider', authAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { soldeReelConfirme } = req.body;
+
   try {
-    const { id } = req.params;
-    const { soldeReelConfirme } = req.body;
-
-    const { rows } = await db.query('SELECT * FROM cartes_soumises WHERE id = $1', [id]);
-    const soumission = rows[0];
-    if (!soumission) return res.status(404).json({ erreur: 'Soumission introuvable.' });
-    if (soumission.statut !== 'en_attente_verification') {
-      return res.status(409).json({ erreur: `Statut actuel non valide pour validation : ${soumission.statut}` });
-    }
-
     if (!soldeReelConfirme) {
-      await db.query(`UPDATE cartes_soumises SET statut = 'rejetee' WHERE id = $1`, [id]);
+      const rejet = await db.query(
+        `UPDATE cartes_soumises SET statut = 'rejetee', mis_a_jour_le = NOW()
+         WHERE id = $1 AND statut = 'en_attente_verification' RETURNING id`,
+        [id]
+      );
+      if (rejet.rows.length === 0) {
+        return res.status(409).json({ erreur: 'Carte introuvable ou déjà traitée.' });
+      }
       return res.json({ statut: 'rejetee' });
     }
 
-    const payout = await declencherPayout({
-      montant: soumission.montant_propose,
-      utilisateurId: soumission.utilisateur_id,
-      moyenPaiement: soumission.moyen_paiement,
-    });
-
-    await db.query(
-      `UPDATE cartes_soumises SET statut = 'payee', payout_reference = $2 WHERE id = $1`,
-      [id, payout.reference]
+    // Verrou : empêche de payer deux fois la même carte
+    const verrou = await db.query(
+      `UPDATE cartes_soumises SET statut = 'paiement_en_cours', mis_a_jour_le = NOW()
+       WHERE id = $1 AND statut = 'en_attente_verification' RETURNING *`,
+      [id]
     );
+    const soumission = verrou.rows[0];
+    if (!soumission) {
+      return res.status(409).json({ erreur: 'Carte introuvable ou déjà traitée.' });
+    }
 
-    return res.json({ statut: 'payee', payoutReference: payout.reference });
+    try {
+      const payout = await declencherPayout({
+        montantUsd: soumission.montant_propose,
+        telephone: soumission.telephone,
+        reference: id,
+      });
+
+      await db.query(
+        `UPDATE cartes_soumises SET statut = 'payee', payout_reference = $2, mis_a_jour_le = NOW() WHERE id = $1`,
+        [id, payout.reference]
+      );
+      return res.json({ statut: 'payee', payoutReference: payout.reference, montantXof: payout.montantXof });
+    } catch (erreurPaiement) {
+      await db.query(
+        `UPDATE cartes_soumises SET statut = 'en_attente_verification', mis_a_jour_le = NOW() WHERE id = $1`,
+        [id]
+      );
+      console.error('Paiement échoué :', erreurPaiement.message);
+      return res.status(502).json({ erreur: erreurPaiement.message });
+    }
   } catch (err) {
     console.error('Erreur /soumissions/:id/valider :', err);
     return res.status(500).json({ erreur: 'Erreur interne lors de la validation.' });
