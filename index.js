@@ -32,6 +32,8 @@ async function initialiserBase() {
       mis_a_jour_le TIMESTAMP NOT NULL DEFAULT NOW()
     )
   `);
+    await db.query('ALTER TABLE cartes_soumises ADD COLUMN IF NOT EXISTS telephone VARCHAR(20)');
+
   console.log('Table cartes_soumises prête.');
 }
 
